@@ -1,0 +1,56 @@
+# Pattern 1: Vault Agent sidecar injector. Secrets are rendered to files in
+# a shared in-memory volume; the app reads files and never talks to Vault.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: orders
+  namespace: team-orders-prod
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders
+  namespace: team-orders-prod
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: orders
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: orders
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: orders
+        vault.hashicorp.com/auth-path: auth/kubernetes
+        vault.hashicorp.com/agent-pre-populate-only: "false"
+        vault.hashicorp.com/agent-run-as-user: "10001"
+        # Dynamic DB creds, re-rendered before the lease expires.
+        vault.hashicorp.com/agent-inject-secret-db.env: database/creds/orders-app
+        vault.hashicorp.com/agent-inject-template-db.env: |
+          {{- with secret "database/creds/orders-app" -}}
+          DB_USER={{ .Data.username }}
+          DB_PASSWORD={{ .Data.password }}
+          {{- end }}
+        # Static config from KV v2.
+        vault.hashicorp.com/agent-inject-secret-config.json: kv/data/apps/orders/config
+        vault.hashicorp.com/agent-inject-template-config.json: |
+          {{- with secret "kv/data/apps/orders/config" -}}
+          {{ .Data.data | toJSON }}
+          {{- end }}
+    spec:
+      serviceAccountName: orders
+      containers:
+        - name: app
+          image: ghcr.io/example/orders:1.4.2
+          command: ["/bin/sh", "-c", "set -a && . /vault/secrets/db.env && exec /app/server"]
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 10001
+            capabilities:
+              drop: ["ALL"]

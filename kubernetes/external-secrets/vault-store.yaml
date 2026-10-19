@@ -1,0 +1,41 @@
+# Pattern 3: External Secrets Operator with a Vault backend. The same
+# ExternalSecret API as the AWS Secrets Manager store in gitops-argocd-platform,
+# so teams don't care which backend the platform uses.
+apiVersion: external-secrets.io/v1beta1
+kind: SecretStore
+metadata:
+  name: vault
+  namespace: team-orders-prod
+spec:
+  provider:
+    vault:
+      server: https://vault.vault.svc:8200
+      path: kv
+      version: v2
+      caProvider:
+        type: ConfigMap
+        name: vault-ca
+        key: ca.crt
+      auth:
+        kubernetes:
+          mountPath: kubernetes
+          role: orders
+          serviceAccountRef:
+            name: orders
+            audiences: ["vault"]
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: orders-config
+  namespace: team-orders-prod
+spec:
+  refreshInterval: 15m
+  secretStoreRef:
+    kind: SecretStore
+    name: vault
+  target:
+    name: orders-config
+  dataFrom:
+    - extract:
+        key: apps/orders/config

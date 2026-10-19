@@ -1,0 +1,49 @@
+# Pattern 2: Vault Secrets Operator. Vault data is synced into native
+# Kubernetes Secrets, and Deployments roll automatically when it changes.
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultAuth
+metadata:
+  name: orders
+  namespace: team-orders-prod
+spec:
+  method: kubernetes
+  mount: kubernetes
+  kubernetes:
+    role: orders
+    serviceAccount: orders
+    audiences: ["vault"]
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultStaticSecret
+metadata:
+  name: orders-config
+  namespace: team-orders-prod
+spec:
+  vaultAuthRef: orders
+  mount: kv
+  type: kv-v2
+  path: apps/orders/config
+  refreshAfter: 60s
+  destination:
+    name: orders-config
+    create: true
+  rolloutRestartTargets:
+    - kind: Deployment
+      name: orders
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultDynamicSecret
+metadata:
+  name: orders-db
+  namespace: team-orders-prod
+spec:
+  vaultAuthRef: orders
+  mount: database
+  path: creds/orders-app
+  renewalPercent: 67
+  destination:
+    name: orders-db
+    create: true
+  rolloutRestartTargets:
+    - kind: Deployment
+      name: orders
